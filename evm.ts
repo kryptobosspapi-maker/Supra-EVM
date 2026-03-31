@@ -1,172 +1,78 @@
-import { EVMMemory } from './memory';
-import { EVMStack, normalizeWord } from './stack';
-import { ExecutionContext, OPCODES } from './opcodes';
+import { WORD_BYTES, normalizeWord } from './stack';
 
-export interface EVMState {
-  pc: number;
-  stack: bigint[];
-  memory: string;
-  storage: Map<string, bigint>;
-  gasUsed: bigint;
-  halted: boolean;
-  returnData: Uint8Array<ArrayBufferLike>;
-}
+export class EVMMemory {
+  private data = new Uint8Array(0);
 
-export interface ExecutionResult {
-  success: boolean;
-  output: bigint[];
-  gasUsed: bigint;
-  storage: Map<string, bigint>;
-  returnData: Uint8Array<ArrayBufferLike>;
-  error?: string;
-}
-
-export interface SupraEVMOptions {
-  gasLimit?: bigint;
-  maxSteps?: number;
-}
-
-function chunkBytesToWords(bytes: Uint8Array<ArrayBufferLike>): bigint[] {
-  if (bytes.length === 0) {
-    return [];
-  }
-
-  const output: bigint[] = [];
-  for (let offset = 0; offset < bytes.length; offset += 32) {
-    let word = 0n;
-    const end = Math.min(offset + 32, bytes.length);
-    for (let i = offset; i < end; i += 1) {
-      word = (word << 8n) | BigInt(bytes[i]);
+  private ensureSize(size: number): void {
+    if (size <= this.data.length) {
+      return;
     }
-    const missing = 32 - (end - offset);
-    word <<= BigInt(missing * 8);
-    output.push(normalizeWord(word));
-  }
-  return output;
-}
 
-export class SupraEVM {
-  private readonly bytecode: Uint8Array<ArrayBufferLike>;
-  private readonly gasLimit: bigint;
-  private readonly maxSteps: number;
+    let nextLength = this.data.length === 0 ? 32 : this.data.length;
+    while (nextLength < size) {
+      nextLength *= 2;
+    }
 
-  private stack = new EVMStack();
-  private memory = new EVMMemory();
-  private storage = new Map<string, bigint>();
-  private pc = 0;
-  private gasUsed = 0n;
-  private halted = false;
-  private returnData: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
-
-  constructor(bytecode: Uint8Array<ArrayBufferLike>, options: SupraEVMOptions = {}) {
-    this.bytecode = bytecode;
-    this.gasLimit = options.gasLimit ?? 10_000_000n;
-    this.maxSteps = options.maxSteps ?? 100_000;
+    const next = new Uint8Array(nextLength);
+    next.set(this.data);
+    this.data = next;
   }
 
-  execute(): ExecutionResult {
-    this.reset();
+  readByte(offset: number): number {
+    if (offset < 0) {
+      throw new Error('Negative memory offset');
+    }
+    return offset < this.data.length ? this.data[offset] : 0;
+  }
 
-    try {
-      let steps = 0;
-      while (!this.halted && this.pc < this.bytecode.length) {
-        if (steps >= this.maxSteps) {
-          throw new Error('Max steps exceeded');
-        }
-        steps += 1;
+  writeByte(offset: number, value: number): void {
+    if (offset < 0) {
+      throw new Error('Negative memory offset');
+    }
+    this.ensureSize(offset + 1);
+    this.data[offset] = value & 0xff;
+  }
 
-        const currentPc = this.pc;
-        const opcodeByte = this.bytecode[this.pc];
-        const opcode = OPCODES[opcodeByte];
-        if (!opcode) {
-          throw new Error(`Unknown opcode: 0x${opcodeByte.toString(16).padStart(2, '0')}`);
-        }
+  readWord(offset: number): bigint {
+    if (offset < 0) {
+      throw new Error('Negative memory offset');
+    }
 
-        this.gasUsed += opcode.gasCost;
-        if (this.gasUsed > this.gasLimit) {
-          throw new Error('Out of gas');
-        }
+    let result = 0n;
+    for (let i = 0; i < WORD_BYTES; i += 1) {
+      result = (result << 8n) | BigInt(this.readByte(offset + i));
+    }
+    return normalizeWord(result);
+  }
 
-        const ctx: ExecutionContext = {
-          stack: this.stack,
-          memory: this.memory,
-          storage: this.storage,
-          bytecode: this.bytecode,
-          pc: currentPc,
-          jump: (destination: number) => {
-            this.pc = destination;
-          },
-          halt: () => {
-            this.halted = true;
-          },
-          setReturnData: (data: Uint8Array<ArrayBufferLike>) => {
-            this.returnData = data;
-          },
-        };
+  writeWord(offset: number, value: bigint): void {
+    if (offset < 0) {
+      throw new Error('Negative memory offset');
+    }
 
-        opcode.handler(ctx);
-        if (!this.halted && this.pc === currentPc) {
-          this.pc += 1;
-        }
-      }
-
-      return {
-        success: true,
-        output: this.returnData.length > 0 ? chunkBytesToWords(this.returnData) : this.stack.toArray(),
-        gasUsed: this.gasUsed,
-        storage: new Map(this.storage),
-        returnData: this.returnData.slice(),
-      };
-    } catch (error) {
-      return {
-        success: false,
-        output: this.stack.toArray(),
-        gasUsed: this.gasUsed,
-        storage: new Map(this.storage),
-        returnData: this.returnData.slice(),
-        error: error instanceof Error ? error.message : String(error),
-      };
+    this.ensureSize(offset + WORD_BYTES);
+    let remaining = normalizeWord(value);
+    for (let i = WORD_BYTES - 1; i >= 0; i -= 1) {
+      this.data[offset + i] = Number(remaining & 0xffn);
+      remaining >>= 8n;
     }
   }
 
-  getState(): EVMState {
-    return {
-      pc: this.pc,
-      stack: this.stack.toArray(),
-      memory: this.memory.toHex(),
-      storage: new Map(this.storage),
-      gasUsed: this.gasUsed,
-      halted: this.halted,
-      returnData: this.returnData.slice(),
-    };
+  readSlice(offset: number, size: number): Uint8Array {
+    if (offset < 0 || size < 0) {
+      throw new Error('Negative memory offset or size');
+    }
+    const out = new Uint8Array(size);
+    for (let i = 0; i < size; i += 1) {
+      out[i] = this.readByte(offset + i);
+    }
+    return out;
   }
 
-  reset(): void {
-    this.stack = new EVMStack();
-    this.memory = new EVMMemory();
-    this.storage = new Map<string, bigint>();
-    this.pc = 0;
-    this.gasUsed = 0n;
-    this.halted = false;
-    this.returnData = new Uint8Array(0);
+  toHex(limit = 256): string {
+    const visible = this.data.slice(0, Math.min(limit, this.data.length));
+    return Array.from(visible)
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
   }
-}
-
-export function hexToBytecode(hex: string): Uint8Array<ArrayBufferLike> {
-  const normalized = hex.replace(/0x/gi, '').replace(/[^0-9a-f]/gi, '');
-  if (normalized.length % 2 !== 0) {
-    throw new Error('Hex string must have an even number of characters');
-  }
-
-  const bytes = new Uint8Array(normalized.length / 2);
-  for (let i = 0; i < normalized.length; i += 2) {
-    bytes[i / 2] = Number.parseInt(normalized.slice(i, i + 2), 16);
-  }
-  return bytes;
-}
-
-export function bytecodeToHex(bytecode: Uint8Array<ArrayBufferLike>): string {
-  return `0x${Array.from(bytecode)
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')}`;
 }

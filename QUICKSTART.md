@@ -1,75 +1,53 @@
-# Supra EVM - Quick Start Guide
+# Supra EVM - Phase 2 Update
 
-## 1. Clone the repository
+## Summary
 
-```bash
-git clone https://github.com/kryptobosspapi-maker/supra-evm.git
-cd supra-evm
-```
+Phase 2 extends the original MVP into a broader proof of concept with **35+ implemented opcodes** and **17 passing tests**.
 
-## 2. Install dependencies
+## New opcode groups added
 
-```bash
-npm install
-```
+### Memory
+- `MLOAD` (`0x51`)
+- `MSTORE` (`0x52`)
+- `MSTORE8` (`0x53`)
 
-## 3. Run the test suite
+### Bitwise
+- `AND` (`0x16`)
+- `OR` (`0x17`)
+- `XOR` (`0x18`)
+- `NOT` (`0x19`)
+- `SHL` (`0x1b`)
+- `SHR` (`0x1c`)
+- `SAR` (`0x1d`)
 
-```bash
-npm test
-```
+### Signed comparisons and checks
+- `SLT` (`0x12`)
+- `SGT` (`0x13`)
+- `ISZERO` (`0x15`)
 
-Expected outcome for the documented Phase 2 state:
+## Existing functionality retained
+
+- Arithmetic: `ADD`, `MUL`, `SUB`, `DIV`
+- Comparison: `LT`, `GT`, `EQ`
+- Stack: `POP`, `PUSH1-PUSH32`, `DUP1`, `SWAP1`
+- Storage: `SLOAD`, `SSTORE`
+- Control flow: `JUMP`, `JUMPI`, `JUMPDEST`, `STOP`, `RETURN`
+
+## Test status
+
+Documented Phase 2 result:
 
 ```text
 Tests passed: 17/17
 ```
 
-## 4. Build for production
+## Recommended Phase 3 directions
 
-```bash
-npm run build
-```
+### Option A
+Expand opcode coverage further.
 
-This creates a `dist/` directory with compiled JavaScript.
+### Option B
+Run real Solidity contract bytecode against the interpreter.
 
-## Minimal usage example
-
-Create `example.ts`:
-
-```typescript
-import { SupraEVM, hexToBytecode } from "./src/evm";
-
-const bytecode = hexToBytecode("0x6005 6003 01 00");
-const evm = new SupraEVM(bytecode);
-const result = evm.execute();
-
-console.log("Result:", result.output[0].toString());
-console.log("Gas used:", result.gasUsed.toString());
-```
-
-Run it:
-
-```bash
-npx ts-node example.ts
-```
-
-## Troubleshooting
-
-### PowerShell execution policy issue
-
-If PowerShell blocks npm scripts, use:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-```
-
-Then rerun:
-
-```bash
-npm test
-```
-
-### Missing source files
-
-If `src/` is not present, restore it before building or publishing.
+### Option C
+Prepare an integration layer for future Supra runtime work.
